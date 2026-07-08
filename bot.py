@@ -88,5 +88,4 @@ async def get_best_deals(bot: Bot):
             soup = BeautifulSoup(response.text, "lxml")
 
             # Preis extrahieren
-            price = None
-           
+            price
