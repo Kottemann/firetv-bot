@@ -33,36 +33,46 @@ async def get_best_deals():
     print(f"[{datetime.now().strftime('%H:%M')}] Geizhals Suche gestartet...")
     good_deals = []
 
+    # Sehr realistische Browser-Headers
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "de-DE,de;q=0.9,en;q=0.8",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Referer": "https://www.google.com/",
+        "DNT": "1",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1"
     }
 
     for model, url in MODELS.items():
         try:
-            resp = requests.get(url, headers=headers, timeout=15)
+            resp = requests.get(url, headers=headers, timeout=20)
             print(f"   → {model}: Status {resp.status_code}")
             
+            if resp.status_code != 200:
+                print(f"   → {model}: Wird blockiert (Status {resp.status_code})")
+                continue
+                
             soup = BeautifulSoup(resp.text, 'html.parser')
             products = soup.find_all('div', class_='productlist__item')
 
             print(f"   → {model}: {len(products)} Produkte gefunden")
 
-            for p in products[:12]:
+            for p in products[:10]:
                 try:
                     name_tag = p.find('a', class_='productlist__link')
                     name = name_tag.get_text(strip=True) if name_tag else model
 
-                    # Preis extrahieren (verschiedene mögliche Klassen)
-                    price_tag = p.find('span', class_='productlist__price') or p.find('span', class_=lambda x: x and 'price' in str(x).lower())
+                    price_tag = p.find('span', class_='productlist__price')
                     price_text = price_tag.get_text(strip=True) if price_tag else ""
                     
-                    # Preis sauber machen
                     price_clean = ''.join(filter(str.isdigit, price_text.replace(',', '.')))
                     price = float(price_clean) / 100 if price_clean else 999
 
                     limit = PRICE_LIMITS.get(model, 999)
                     
-                    if price <= limit:
+                    if price <= limit + 5:   # kleiner Puffer
                         link = "https://geizhals.de" + name_tag['href'] if name_tag else url
                         good_deals.append({
                             "model": model,
@@ -77,9 +87,9 @@ async def get_best_deals():
             print(f"   Fehler bei {model}: {e}")
 
     if good_deals:
-        print(f"✅ {len(good_deals)} gute Deals gefunden → Posten in Kanal")
+        print(f"✅ {len(good_deals)} gute Deals gefunden!")
         await bot.send_message(chat_id=CHANNEL_ID, 
-                              text=f"🔥 **Geizhals Fire TV Deals** — {datetime.now().strftime('%d.%m.%Y')}\n",
+                              text=f"🔥 **Geizhals Fire TV Deals** — {datetime.now().strftime('%d.%m.%Y')}",
                               parse_mode='Markdown')
         
         for deal in sorted(good_deals, key=lambda x: x['price'])[:3]:
@@ -93,7 +103,7 @@ async def get_best_deals():
             await bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode='Markdown')
             await asyncio.sleep(2)
     else:
-        print("❌ Keine Deals unter den Preisgrenzen gefunden.")
+        print("❌ Keine guten Deals unter den Preisgrenzen gefunden.")
 
 async def main():
     scheduler = AsyncIOScheduler(timezone="Europe/Berlin")
@@ -101,7 +111,7 @@ async def main():
     scheduler.start()
     print("Bot gestartet - sucht täglich um 7 Uhr auf Geizhals")
     
-    await get_best_deals()  # Sofort-Test
+    await get_best_deals()
 
     while True:
         await asyncio.sleep(3600)
