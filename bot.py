@@ -29,12 +29,11 @@ PRICE_LIMITS = {
     "Fire TV Cube": 150
 }
 
-# Idealo Such-Links
 MODELS = {
-    "Fire TV Stick 4K": "https://www.idealo.de/preisvergleich/OffersOfProduct/202020202.html",
-    "Fire TV Stick 4K Plus": "https://www.idealo.de/preisvergleich/OffersOfProduct/202030303.html",
-    "Fire TV Stick 4K Max": "https://www.idealo.de/preisvergleich/OffersOfProduct/202040404.html",
-    "Fire TV Cube": "https://www.idealo.de/preisvergleich/OffersOfProduct/201919191.html"
+    "Fire TV Stick 4K": "https://geizhals.de/?fs=fire+tv+stick+4k",
+    "Fire TV Stick 4K Plus": "https://geizhals.de/?fs=fire+tv+stick+4k+plus",
+    "Fire TV Stick 4K Max": "https://geizhals.de/?fs=fire+tv+stick+4k+max",
+    "Fire TV Cube": "https://geizhals.de/?fs=fire+tv+cube"
 }
 
 
@@ -60,10 +59,10 @@ def run_health_server():
 
 
 # -------------------------------------------------------------
-# IDEALO SCRAPER
+# GEIZHALS SCRAPER
 # -------------------------------------------------------------
 async def get_best_deals(bot: Bot):
-    print(f"[{datetime.now().strftime('%H:%M')}] Idealo Fire TV Suche gestartet...")
+    print(f"[{datetime.now().strftime('%H:%M')}] Geizhals Suche gestartet...")
 
     deals = []
     session = requests.Session()
@@ -72,55 +71,36 @@ async def get_best_deals(bot: Bot):
         try:
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             }
 
-            response = session.get(url, headers=headers, timeout=20)
+            response = session.get(url, headers=headers, timeout=25)
             print(f"→ {model}: Status {response.status_code}")
 
             if response.status_code != 200:
-                print(f"   ⚠️ Konnte {model} nicht laden")
-                await asyncio.sleep(6)
+                print(f"   ⚠️ Blockiert ({response.status_code})")
+                await asyncio.sleep(10)
                 continue
 
             soup = BeautifulSoup(response.text, "lxml")
 
-            # Preise auf Idealo finden
-            price_tags = soup.find_all("span", class_=["price", "product-offer__price", "offer-price"])
-            found = False
+            # Einfache Preissuche
+            price_match = re.search(r"€\s*(\d{2,4})[.,](\d{2})", response.text)
+            if price_match:
+                price = float(price_match.group(1) + "." + price_match.group(2))
+                print(f"   → Gefundener Preis: {price:.2f}€")
 
-            for tag in price_tags[:10]:
-                try:
-                    price_text = tag.get_text(strip=True)
-                    match = re.search(r"[\d.,]+", price_text)
-                    if match:
-                        price_str = match.group(0).replace(".", "").replace(",", ".")
-                        price = float(price_str)
+                if price <= PRICE_LIMITS.get(model, 999) + 10:
+                    deals.append({
+                        "model": model,
+                        "name": model,
+                        "price": price,
+                        "link": url
+                    })
+                    print(f"✅ Deal: {model} {price:.2f}€")
+            else:
+                print(f"   → Kein Preis gefunden")
 
-                        if price <= PRICE_LIMITS.get(model, 999) + 10:
-                            # Produktname
-                            name_tag = soup.find("h1") or soup.find("title")
-                            name = name_tag.get_text(strip=True)[:90] if name_tag else model
-
-                            link_tag = tag.find_parent("a") or soup.find("a", href=True)
-                            link = "https://www.idealo.de" + link_tag["href"] if link_tag and link_tag.get("href") else url
-
-                            deals.append({
-                                "model": model,
-                                "name": name,
-                                "price": price,
-                                "link": link
-                            })
-                            print(f"✅ Guter Deal: {model} für {price:.2f}€")
-                            found = True
-                            break
-                except:
-                    continue
-
-            if not found:
-                print(f"→ {model}: Kein passender Preis gefunden")
-
-            await asyncio.sleep(random.uniform(4, 8))
+            await asyncio.sleep(random.uniform(6, 12))
 
         except Exception as e:
             print(f"Fehler bei {model}: {e}")
@@ -131,17 +111,12 @@ async def get_best_deals(bot: Bot):
 
     await bot.send_message(
         chat_id=CHANNEL_ID,
-        text=f"🔥 *Idealo Fire TV Deals*\n{datetime.now().strftime('%d.%m.%Y')}",
+        text=f"🔥 *Geizhals Fire TV Deals*\n{datetime.now().strftime('%d.%m.%Y')}",
         parse_mode="Markdown"
     )
 
-    for deal in sorted(deals, key=lambda x: x["price"])[:3]:
-        text = (
-            f"🔥 *{deal['model']}*\n\n"
-            f"{deal['name']}\n"
-            f"💰 *{deal['price']:.2f} €*\n\n"
-            f"🔗 [Zum Angebot]({deal['link']})"
-        )
+    for deal in sorted(deals, key=lambda x: x["price"]):
+        text = f"🔥 *{deal['model']}*\n💰 *{deal['price']:.2f} €*\n🔗 [Zum Angebot]({deal['link']})"
         await bot.send_message(chat_id=CHANNEL_ID, text=text, parse_mode="Markdown")
         await asyncio.sleep(2)
 
@@ -153,6 +128,10 @@ async def main():
     threading.Thread(target=run_health_server, daemon=True).start()
 
     async with Bot(token=TOKEN) as bot:
+        print("Bot gestartet - erste Suche läuft...")
+
+        await get_best_deals(bot)  # Testlauf
+
         scheduler = AsyncIOScheduler(timezone="Europe/Berlin")
         scheduler.add_job(
             lambda: asyncio.create_task(get_best_deals(bot)),
@@ -162,8 +141,7 @@ async def main():
         )
         scheduler.start()
 
-        print("Bot gestartet - tägliche Idealo-Suche um 7 Uhr")
-        await get_best_deals(bot)
+        print("Scheduler aktiv (täglich 7 Uhr)")
 
         while True:
             await asyncio.sleep(3600)
