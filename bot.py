@@ -11,6 +11,7 @@ from bs4 import BeautifulSoup
 from telegram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+
 # -------------------------------------------------------------
 # KONFIGURATION
 # -------------------------------------------------------------
@@ -28,12 +29,14 @@ PRICE_LIMITS = {
     "Fire TV Cube": 150
 }
 
+# Amazon Links
 MODELS = {
     "Fire TV Stick 4K": "https://www.amazon.de/Amazon-Fire-TV-Stick-4K/dp/B0C1H26C7X",
     "Fire TV Stick 4K Plus": "https://www.amazon.de/Amazon-Fire-TV-Stick-4K-Plus/dp/B0C1H1X7Z6",
     "Fire TV Stick 4K Max": "https://www.amazon.de/Amazon-Fire-TV-Stick-4K-Max/dp/B0C1H2Z9Z6",
     "Fire TV Cube": "https://www.amazon.de/Amazon-Fire-TV-Cube/dp/B09N6W9Z9Z"
 }
+
 
 # -------------------------------------------------------------
 # HEALTH CHECK
@@ -48,11 +51,13 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         return
 
+
 def run_health_server():
     port = int(os.getenv("PORT", 8080))
     server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
     print(f"[System] Health Check läuft auf Port {port}")
     server.serve_forever()
+
 
 # -------------------------------------------------------------
 # AMAZON SCRAPER
@@ -66,7 +71,7 @@ async def get_best_deals(bot: Bot):
     for model, url in MODELS.items():
         try:
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                 "Accept-Language": "de-DE,de;q=0.9",
             }
@@ -79,41 +84,51 @@ async def get_best_deals(bot: Bot):
                 await asyncio.sleep(6)
                 continue
 
-            soup = BeautifulSoup(response.text, "lxml")
-
+            # Verbesserte Preissuche für Amazon
             price = None
-            for selector in ["span.a-price-whole", ".a-offscreen", "#priceblock_ourprice"]:
-                element = soup.select_one(selector)
-                if element:
-                    match = re.search(r"[\d.,]+", element.get_text())
-                    if match:
-                        price = float(match.group(0).replace(".", "").replace(",", "."))
-                        break
+            price_match = re.search(r'["\']price["\']\s*:\s*["\']?(\d+[.,]\d+)', response.text)
+            if not price_match:
+                price_match = re.search(r'(\d{2,4})[.,](\d{2})\s*€', response.text)
+
+            if price_match:
+                try:
+                    if isinstance(price_match.group(0), str):
+                        price_str = re.sub(r'[^\d.,]', '', price_match.group(0))
+                        price = float(price_str.replace(".", "").replace(",", "."))
+                except:
+                    pass
 
             if not price:
-                match = re.search(r"([\d.,]+)\s*€", response.text)
+                match = re.search(r'(\d{2,4})[.,](\d{2})', response.text)
                 if match:
-                    price = float(match.group(1).replace(".", "").replace(",", "."))
+                    price = float(match.group(0).replace(",", "."))
 
-            if price and price <= PRICE_LIMITS.get(model, 999) + 10:
-                name_tag = soup.find("span", id="productTitle")
-                name = name_tag.get_text(strip=True)[:100] if name_tag else model
+            if price and price > 5:  # plausibler Preis
+                limit = PRICE_LIMITS.get(model, 999)
+                if price <= limit + 15:
+                    name_match = re.search(r'<title>(.*?)</title>', response.text, re.IGNORECASE)
+                    name = name_match.group(1).split('|')[0].strip()[:100] if name_match else model
 
-                deals.append({
-                    "model": model,
-                    "name": name,
-                    "price": price,
-                    "link": url
-                })
-                print(f"✅ Guter Deal: {model} für {price:.2f}€")
+                    deals.append({
+                        "model": model,
+                        "name": name,
+                        "price": price,
+                        "link": url
+                    })
+                    print(f"✅ Guter Deal: {model} für {price:.2f}€")
+                else:
+                    print(f"→ {model}: {price:.2f}€ (über Limit)")
             else:
-                print(f"→ {model}: {price if price else 'Kein Preis'}")
+                print(f"→ {model}: Preis nicht gefunden")
 
-            await asyncio.sleep(random.uniform(4, 8))
+            await asyncio.sleep(random.uniform(5, 9))
 
         except Exception as e:
             print(f"Fehler bei {model}: {e}")
 
+    # ---------------------------------------------------------
+    # TELEGRAM SENDEN
+    # ---------------------------------------------------------
     if not deals:
         print("❌ Keine guten Deals gefunden.")
         return
@@ -125,9 +140,15 @@ async def get_best_deals(bot: Bot):
     )
 
     for deal in sorted(deals, key=lambda x: x["price"]):
-        text = f"🔥 *{deal['model']}*\n\n{deal['name']}\n💰 *{deal['price']:.2f} €*\n\n🔗 [Bei Amazon kaufen]({deal['link']})"
+        text = (
+            f"🔥 *{deal['model']}*\n\n"
+            f"{deal['name']}\n"
+            f"💰 *{deal['price']:.2f} €*\n\n"
+            f"🔗 [Bei Amazon kaufen]({deal['link']})"
+        )
         await bot.send_message(chat_id=CHANNEL_ID, text=text, parse_mode="Markdown")
         await asyncio.sleep(2)
+
 
 # -------------------------------------------------------------
 # START
@@ -150,6 +171,7 @@ async def main():
 
         while True:
             await asyncio.sleep(3600)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
