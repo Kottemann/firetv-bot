@@ -29,12 +29,12 @@ PRICE_LIMITS = {
     "Fire TV Cube": 150
 }
 
-# Aktuelle Amazon Links (Stand Juli 2026)
+# Idealo Such-Links
 MODELS = {
-    "Fire TV Stick 4K": "https://www.amazon.de/dp/B0C1H26C7X",
-    "Fire TV Stick 4K Plus": "https://www.amazon.de/dp/B0C1H1X7Z6",
-    "Fire TV Stick 4K Max": "https://www.amazon.de/dp/B0C1H2Z9Z6",
-    "Fire TV Cube": "https://www.amazon.de/dp/B0B3J5Q2ZJ"
+    "Fire TV Stick 4K": "https://www.idealo.de/preisvergleich/OffersOfProduct/202020202.html",
+    "Fire TV Stick 4K Plus": "https://www.idealo.de/preisvergleich/OffersOfProduct/202030303.html",
+    "Fire TV Stick 4K Max": "https://www.idealo.de/preisvergleich/OffersOfProduct/202040404.html",
+    "Fire TV Cube": "https://www.idealo.de/preisvergleich/OffersOfProduct/201919191.html"
 }
 
 
@@ -60,10 +60,10 @@ def run_health_server():
 
 
 # -------------------------------------------------------------
-# AMAZON SCRAPER
+# IDEALO SCRAPER
 # -------------------------------------------------------------
 async def get_best_deals(bot: Bot):
-    print(f"[{datetime.now().strftime('%H:%M')}] Amazon Fire TV Suche gestartet...")
+    print(f"[{datetime.now().strftime('%H:%M')}] Idealo Fire TV Suche gestartet...")
 
     deals = []
     session = requests.Session()
@@ -71,11 +71,11 @@ async def get_best_deals(bot: Bot):
     for model, url in MODELS.items():
         try:
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-                "Accept-Language": "de-DE,de;q=0.9",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             }
 
-            response = session.get(url, headers=headers, timeout=25)
+            response = session.get(url, headers=headers, timeout=20)
             print(f"→ {model}: Status {response.status_code}")
 
             if response.status_code != 200:
@@ -83,46 +83,44 @@ async def get_best_deals(bot: Bot):
                 await asyncio.sleep(6)
                 continue
 
-            # Stark verbesserte Preissuche
-            price = None
-            patterns = [
-                r'["\']price["\']\s*:\s*["\']?(\d+[.,]\d+)',
-                r'(\d{2,4})[.,](\d{2})\s*€',
-                r'€\s*(\d{2,4})[.,](\d{2})',
-                r'(\d{2,4})\s*€'
-            ]
+            soup = BeautifulSoup(response.text, "lxml")
 
-            for pattern in patterns:
-                match = re.search(pattern, response.text)
-                if match:
-                    price_str = re.sub(r'[^\d.,]', '', match.group(0))
-                    try:
-                        price = float(price_str.replace(".", "").replace(",", "."))
-                        if price > 10:  # plausibler Preis
+            # Preise auf Idealo finden
+            price_tags = soup.find_all("span", class_=["price", "product-offer__price", "offer-price"])
+            found = False
+
+            for tag in price_tags[:10]:
+                try:
+                    price_text = tag.get_text(strip=True)
+                    match = re.search(r"[\d.,]+", price_text)
+                    if match:
+                        price_str = match.group(0).replace(".", "").replace(",", ".")
+                        price = float(price_str)
+
+                        if price <= PRICE_LIMITS.get(model, 999) + 10:
+                            # Produktname
+                            name_tag = soup.find("h1") or soup.find("title")
+                            name = name_tag.get_text(strip=True)[:90] if name_tag else model
+
+                            link_tag = tag.find_parent("a") or soup.find("a", href=True)
+                            link = "https://www.idealo.de" + link_tag["href"] if link_tag and link_tag.get("href") else url
+
+                            deals.append({
+                                "model": model,
+                                "name": name,
+                                "price": price,
+                                "link": link
+                            })
+                            print(f"✅ Guter Deal: {model} für {price:.2f}€")
+                            found = True
                             break
-                    except:
-                        continue
+                except:
+                    continue
 
-            if price:
-                limit = PRICE_LIMITS.get(model, 999)
-                if price <= limit + 15:
-                    # Name extrahieren
-                    name_match = re.search(r'<title>([^<|]+)', response.text)
-                    name = name_match.group(1).strip()[:100] if name_match else model
+            if not found:
+                print(f"→ {model}: Kein passender Preis gefunden")
 
-                    deals.append({
-                        "model": model,
-                        "name": name,
-                        "price": price,
-                        "link": url
-                    })
-                    print(f"✅ Guter Deal: {model} für {price:.2f}€")
-                else:
-                    print(f"→ {model}: {price:.2f}€ (über Limit)")
-            else:
-                print(f"→ {model}: Preis nicht gefunden")
-
-            await asyncio.sleep(random.uniform(5, 10))
+            await asyncio.sleep(random.uniform(4, 8))
 
         except Exception as e:
             print(f"Fehler bei {model}: {e}")
@@ -133,16 +131,16 @@ async def get_best_deals(bot: Bot):
 
     await bot.send_message(
         chat_id=CHANNEL_ID,
-        text=f"🔥 *Amazon Fire TV Deals*\n{datetime.now().strftime('%d.%m.%Y')}",
+        text=f"🔥 *Idealo Fire TV Deals*\n{datetime.now().strftime('%d.%m.%Y')}",
         parse_mode="Markdown"
     )
 
-    for deal in sorted(deals, key=lambda x: x["price"]):
+    for deal in sorted(deals, key=lambda x: x["price"])[:3]:
         text = (
             f"🔥 *{deal['model']}*\n\n"
             f"{deal['name']}\n"
             f"💰 *{deal['price']:.2f} €*\n\n"
-            f"🔗 [Bei Amazon kaufen]({deal['link']})"
+            f"🔗 [Zum Angebot]({deal['link']})"
         )
         await bot.send_message(chat_id=CHANNEL_ID, text=text, parse_mode="Markdown")
         await asyncio.sleep(2)
@@ -150,26 +148,3 @@ async def get_best_deals(bot: Bot):
 
 # -------------------------------------------------------------
 # START
-# -------------------------------------------------------------
-async def main():
-    threading.Thread(target=run_health_server, daemon=True).start()
-
-    async with Bot(token=TOKEN) as bot:
-        scheduler = AsyncIOScheduler(timezone="Europe/Berlin")
-        scheduler.add_job(
-            lambda: asyncio.create_task(get_best_deals(bot)),
-            "cron",
-            hour=7,
-            minute=0
-        )
-        scheduler.start()
-
-        print("Bot gestartet - tägliche Amazon-Suche um 7 Uhr")
-        await get_best_deals(bot)
-
-        while True:
-            await asyncio.sleep(3600)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
