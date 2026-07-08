@@ -1,5 +1,6 @@
 import asyncio
 import os
+import random
 import re
 import threading
 from datetime import datetime
@@ -58,27 +59,37 @@ def run_health_server():
 
 
 # -------------------------------------------------------------
-# GEIZHALS SCRAPER (aktualisiert 2026)
+# GEIZHALS SCRAPER (mit Anti-Block)
 # -------------------------------------------------------------
 async def get_best_deals(bot: Bot):
     print(f"[{datetime.now().strftime('%H:%M')}] Geizhals Suche gestartet...")
 
     deals = []
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-    }
+    session = requests.Session()
 
     for model, url in MODELS.items():
         try:
-            response = requests.get(url, headers=headers, timeout=20)
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "de-DE,de;q=0.9,en;q=0.8",
+                "Referer": "https://geizhals.de/",
+                "DNT": "1",
+            }
+
+            response = session.get(url, headers=headers, timeout=25)
             print(f"→ {model}: Status {response.status_code}")
+
+            if response.status_code == 403:
+                print(f"   ⚠️ 403 Block bei {model} – warte länger...")
+                await asyncio.sleep(8)
+                continue
 
             if response.status_code != 200:
                 continue
 
             soup = BeautifulSoup(response.text, "lxml")
 
-            # Neue Struktur von Geizhals
             products = soup.find_all(["h1", "h2", "h3"])
             print(f"→ {model}: {len(products)} mögliche Produkte gefunden")
 
@@ -89,21 +100,20 @@ async def get_best_deals(bot: Bot):
                         continue
 
                     name = link_tag.get_text(strip=True)
-                    if not name or model.split()[0] not in name and "Fire TV" not in name:
+                    if not name or ("Fire TV" not in name and "Stick" not in name):
                         continue
 
-                    # Preis im nachfolgenden Text suchen
+                    # Preis suchen
                     price_text = None
-                    for sibling in item.find_next_siblings()[:8]:
+                    for sibling in list(item.find_next_siblings())[:10]:
                         text = sibling.get_text(strip=True)
-                        if "€" in text and ("ab" in text.lower() or "um" in text.lower()):
+                        if "€" in text and ("ab" in text.lower() or "um" in text.lower() or "Angebot" in text):
                             price_text = text
                             break
 
                     if not price_text:
                         continue
 
-                    # Preis extrahieren
                     price_match = re.search(r"€\s*([\d.,]+)", price_text)
                     if not price_match:
                         continue
@@ -113,7 +123,7 @@ async def get_best_deals(bot: Bot):
 
                     limit = PRICE_LIMITS.get(model, 999)
 
-                    if price <= limit + 5:
+                    if price <= limit + 8:   # etwas Puffer
                         full_link = link_tag["href"]
                         if full_link.startswith("/"):
                             full_link = "https://geizhals.de" + full_link
@@ -124,12 +134,13 @@ async def get_best_deals(bot: Bot):
                             "price": price,
                             "link": full_link
                         })
-                        print(f"✅ Deal gefunden: {model} {price:.2f}€")
+                        print(f"✅ Deal: {model} {price:.2f}€ → {name[:60]}")
 
                 except Exception:
                     continue
 
-            await asyncio.sleep(2)
+            # Kurze Pause zwischen den Modellen
+            await asyncio.sleep(random.uniform(3, 6))
 
         except Exception as e:
             print(f"Fehler bei {model}: {e}")
@@ -181,7 +192,7 @@ async def main():
 
         print("Bot gestartet - tägliche Suche um 7 Uhr")
 
-        # Testlauf beim Start
+        # Testlauf
         await get_best_deals(bot)
 
         while True:
