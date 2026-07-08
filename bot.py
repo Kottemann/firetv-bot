@@ -28,10 +28,10 @@ PRICE_LIMITS = {
 }
 
 MODELS = {
-    "Fire TV Stick 4K": "https://geizhals.de/?fs=fire+tv+stick+4k",
-    "Fire TV Stick 4K Plus": "https://geizhals.de/?fs=fire+tv+stick+4k+plus",
-    "Fire TV Stick 4K Max": "https://geizhals.de/?fs=fire+tv+stick+4k+max",
-    "Fire TV Cube": "https://geizhals.de/?fs=fire+tv+cube"
+    "Fire TV Stick 4K": "https://geizhals.de/amazon-fire-tv-stick-4k-2nd-gen-v205857.html",
+    "Fire TV Stick 4K Plus": "https://geizhals.de/amazon-fire-tv-stick-4k-plus-53-101623-a3666346.html",
+    "Fire TV Stick 4K Max": "https://geizhals.de/amazon-fire-tv-stick-4k-max-gen-2-2023-53-033176-a3025234.html",
+    "Fire TV Cube": "https://geizhals.de/amazon-fire-tv-cube-gen-3-53-027982-a2827523.html"
 }
 
 
