@@ -6,7 +6,7 @@ from telegram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime
 
-# Environment Variables aus Railway lesen
+# Environment Variables
 TOKEN = os.getenv("TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 
@@ -16,78 +16,89 @@ if not TOKEN or not CHANNEL_ID:
 
 bot = Bot(token=TOKEN)
 
+# Preisgrenzen - du kannst diese hier anpassen
+PRICE_LIMITS = {
+    "Fire TV Stick 4K": 80,
+    "Fire TV Stick 4K Plus": 80,
+    "Fire TV Stick 4K Max": 80,
+    "Fire TV Cube": 150
+}
+
+MODELS = {
+    "Fire TV Stick 4K": "https://geizhals.de/?fs=fire+tv+stick+4k",
+    "Fire TV Stick 4K Plus": "https://geizhals.de/?fs=fire+tv+stick+4k+plus",
+    "Fire TV Stick 4K Max": "https://geizhals.de/?fs=fire+tv+stick+4k+max",
+    "Fire TV Cube": "https://geizhals.de/?fs=fire+tv+cube"
+}
+
 async def get_best_deals():
-    print(f"[{datetime.now().strftime('%H:%M')}] Suche gestartet...")
-    all_deals = []
-    
+    print(f"[{datetime.now().strftime('%H:%M')}] Geizhals Suche gestartet...")
+    good_deals = []
+
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
 
-    models = {
-        "Fire TV Stick 4K": "https://www.idealo.de/preisvergleich/ProductCategory/120556008F.html?sortKey=minPrice",
-        "Fire TV Stick 4K Plus": "https://www.idealo.de/preisvergleich/OffersOfProduct/208414668_-fire-tv-stick-4k-plus-amazon.html",
-        "Fire TV Stick 4K Max": "https://www.idealo.de/preisvergleich/OffersOfProduct/203374258_-fire-tv-stick-4k-max-2-gen-amazon.html",
-        "Fire TV Cube": "https://www.idealo.de/preisvergleich/Liste/120556008/fire-tv-cube.html?sortKey=minPrice"
-    }
-
-    for model, url in models.items():
+    for model, url in MODELS.items():
         try:
             resp = requests.get(url, headers=headers, timeout=15)
-            print(f"   → {model}: Status {resp.status_code}")
-            
-            if resp.status_code != 200:
-                print(f"   → {model}: Seite blockiert oder nicht erreichbar")
-                continue
-                
             soup = BeautifulSoup(resp.text, 'html.parser')
-            offers = soup.find_all('div', class_=lambda x: x and 'offer' in str(x).lower())
             
-            print(f"   → {model}: {len(offers)} Angebote gefunden")
-            
-            for offer in offers[:5]:
+            products = soup.find_all('div', class_='productlist__item')[:10]
+
+            for p in products:
                 try:
-                    name = offer.find(['h2', 'a']).get_text(strip=True) if offer.find(['h2', 'a']) else model
-                    price_text = offer.find(class_=lambda x: x and 'price' in str(x).lower())
-                    price_text = price_text.get_text(strip=True) if price_text else "0"
-                    price = float(''.join(filter(str.isdigit, price_text.replace(',', '.')))) / 100
+                    name_tag = p.find('a', class_='productlist__link')
+                    name = name_tag.get_text(strip=True) if name_tag else model
                     
-                    all_deals.append({
-                        "model": model,
-                        "name": name[:80],
-                        "price": price,
-                        "total": price,
-                        "link": url
-                    })
+                    price_tag = p.find('span', class_='productlist__price')
+                    price_text = price_tag.get_text(strip=True) if price_tag else ""
+                    price = float(price_text.replace('€', '').replace(',', '.').strip()) if price_text else 999
+                    
+                    limit = PRICE_LIMITS.get(model, 999)
+                    
+                    if price <= limit:
+                        link = "https://geizhals.de" + name_tag['href'] if name_tag else url
+                        good_deals.append({
+                            "model": model,
+                            "name": name[:80],
+                            "price": price,
+                            "link": link
+                        })
+                        print(f"   ✅ Guter Deal gefunden: {model} für {price}€")
                 except:
                     continue
         except Exception as e:
             print(f"   Fehler bei {model}: {e}")
 
-    all_deals.sort(key=lambda x: x['total'])
-    best_two = all_deals[:2]
-
-    if best_two:
-        print(f"✅ {len(best_two)} Angebote gefunden")
-        await bot.send_message(chat_id=CHANNEL_ID, text=f"🕖 **Idealo Fire TV Deals** — {datetime.now().strftime('%d.%m.%Y')}", parse_mode='Markdown')
-        for deal in best_two:
+    # Nur posten, wenn wirklich gute Deals vorhanden sind
+    if good_deals:
+        print(f"✅ {len(good_deals)} gute Deals gefunden → Posten")
+        await bot.send_message(
+            chat_id=CHANNEL_ID, 
+            text=f"🔥 **Geizhals Fire TV Deals** — {datetime.now().strftime('%d.%m.%Y')}\n\n"
+                 f"Gute Angebote gefunden:",
+            parse_mode='Markdown'
+        )
+        
+        for deal in good_deals[:3]:   # maximal 3 beste
             msg = f"""🔥 **{deal['model']}**
 
 **{deal['name']}**
 💰 **{deal['price']:.2f} €**
 
-🔗 [Zum Angebot]({deal['link']})
+🔗 [Jetzt anschauen]({deal['link']})
 """
             await bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode='Markdown')
+            await asyncio.sleep(2)
     else:
-        print("❌ Keine Angebote gefunden")
-        await bot.send_message(chat_id=CHANNEL_ID, text=f"🕖 **Idealo Fire TV Suche** — {datetime.now().strftime('%d.%m.%Y')}\n\nMomentan keine guten Angebote gefunden.", parse_mode='Markdown')
+        print("❌ Keine guten Deals unter den Preisgrenzen gefunden.")
 
 async def main():
     scheduler = AsyncIOScheduler(timezone="Europe/Berlin")
     scheduler.add_job(get_best_deals, 'cron', hour=7, minute=0)
     scheduler.start()
-    print("Bot gestartet - täglich um 7 Uhr")
+    print("Bot gestartet - sucht täglich um 7 Uhr auf Geizhals")
     
     await get_best_deals()   # Sofort-Test
 
