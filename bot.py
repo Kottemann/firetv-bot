@@ -29,11 +29,12 @@ PRICE_LIMITS = {
     "Fire TV Cube": 150
 }
 
+# Aktuelle Amazon-Links (ASINs) – bei Bedarf aktualisieren
 MODELS = {
-    "Fire TV Stick 4K": "https://geizhals.de/?fs=fire+tv+stick+4k",
-    "Fire TV Stick 4K Plus": "https://geizhals.de/?fs=fire+tv+stick+4k+plus",
-    "Fire TV Stick 4K Max": "https://geizhals.de/?fs=fire+tv+stick+4k+max",
-    "Fire TV Cube": "https://geizhals.de/?fs=fire+tv+cube"
+    "Fire TV Stick 4K": "https://www.amazon.de/dp/B0C1H26C7X",
+    "Fire TV Stick 4K Plus": "https://www.amazon.de/dp/B0C1H1X7Z6",
+    "Fire TV Stick 4K Max": "https://www.amazon.de/dp/B0C1H2Z9Z6",
+    "Fire TV Cube": "https://www.amazon.de/dp/B09N6W9Z9Z"
 }
 
 
@@ -59,10 +60,10 @@ def run_health_server():
 
 
 # -------------------------------------------------------------
-# GEIZHALS SCRAPER
+# AMAZON SCRAPER
 # -------------------------------------------------------------
 async def get_best_deals(bot: Bot):
-    print(f"[{datetime.now().strftime('%H:%M')}] Geizhals Suche gestartet...")
+    print(f"[{datetime.now().strftime('%H:%M')}] Amazon Fire TV Suche gestartet...")
 
     deals = []
     session = requests.Session()
@@ -73,79 +74,93 @@ async def get_best_deals(bot: Bot):
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                 "Accept-Language": "de-DE,de;q=0.9",
-                "Referer": "https://geizhals.de/",
+                "Referer": "https://www.amazon.de/",
             }
 
-            response = session.get(url, headers=headers, timeout=30)
+            response = session.get(url, headers=headers, timeout=25)
             print(f"→ {model}: Status {response.status_code}")
 
             if response.status_code != 200:
-                print(f"   ⚠️ Block oder Fehler bei {model}")
-                await asyncio.sleep(8)
+                print(f"   ⚠️ Konnte {model} nicht laden")
+                await asyncio.sleep(5)
                 continue
 
             soup = BeautifulSoup(response.text, "lxml")
-            products = soup.find_all(["h1", "h2", "h3"])
 
-            print(f"→ {model}: {len(products)} Überschriften gefunden")
+            # Preis extrahieren
+            price = None
 
-            for item in products[:25]:
-                try:
-                    link_tag = item.find("a", href=True)
-                    if not link_tag:
-                        continue
+            # Verschiedene mögliche Preis-Elemente auf Amazon
+            price_selectors = [
+                "span.a-price-whole",
+                "span.aok-offscreen",
+                ".a-price .a-offscreen",
+                "#corePriceDisplay_desktop_feature_div .a-offscreen",
+                "#priceblock_ourprice",
+                "#priceblock_dealprice"
+            ]
 
-                    name = link_tag.get_text(strip=True)
-                    if "Fire TV" not in name and "Stick" not in name:
-                        continue
-
-                    price_text = None
-                    for sib in item.find_next_siblings()[:10]:
-                        if "€" in sib.get_text():
-                            price_text = sib.get_text()
+            for selector in price_selectors:
+                element = soup.select_one(selector)
+                if element:
+                    text = element.get_text(strip=True)
+                    match = re.search(r"[\d.,]+", text)
+                    if match:
+                        price_str = match.group(0).replace(".", "").replace(",", ".")
+                        try:
+                            price = float(price_str)
                             break
+                        except:
+                            continue
 
-                    if not price_text:
-                        continue
+            if price is None:
+                # Fallback: Suche im gesamten Text
+                match = re.search(r"([\d.,]+)\s*€", response.text)
+                if match:
+                    price = float(match.group(1).replace(".", "").replace(",", "."))
 
-                    price_match = re.search(r"€\s*([\d.,]+)", price_text)
-                    if price_match:
-                        price = float(price_match.group(1).replace(".", "").replace(",", "."))
-                        if price <= PRICE_LIMITS.get(model, 999) + 10:
-                            link = link_tag["href"]
-                            if link.startswith("/"):
-                                link = "https://geizhals.de" + link
-                            deals.append({
-                                "model": model,
-                                "name": name[:90],
-                                "price": price,
-                                "link": link
-                            })
-                            print(f"✅ Deal: {model} {price:.2f}€")
-                except:
-                    continue
+            if price:
+                limit = PRICE_LIMITS.get(model, 999)
+                if price <= limit + 10:
+                    name_tag = soup.find("span", id="productTitle")
+                    name = name_tag.get_text(strip=True)[:90] if name_tag else model
 
-            await asyncio.sleep(random.uniform(4, 8))
+                    deals.append({
+                        "model": model,
+                        "name": name,
+                        "price": price,
+                        "link": url
+                    })
+                    print(f"✅ Deal: {model} {price:.2f}€")
+                else:
+                    print(f"→ {model}: {price:.2f}€ (über Limit)")
+            else:
+                print(f"→ {model}: Kein Preis gefunden")
+
+            await asyncio.sleep(random.uniform(3, 7))
 
         except Exception as e:
             print(f"Fehler bei {model}: {e}")
 
+    # ---------------------------------------------------------
+    # TELEGRAM SENDEN
+    # ---------------------------------------------------------
     if not deals:
         print("❌ Keine guten Deals gefunden.")
         return
 
     await bot.send_message(
         chat_id=CHANNEL_ID,
-        text=f"🔥 *Geizhals Fire TV Deals*\n{datetime.now().strftime('%d.%m.%Y')}",
+        text=f"🔥 *Amazon Fire TV Deals*\n{datetime.now().strftime('%d.%m.%Y')}",
         parse_mode="Markdown"
     )
 
-    for deal in sorted(deals, key=lambda x: x["price"])[:3]:
+    for deal in sorted(deals, key=lambda x: x["price"]):
         text = (
             f"🔥 *{deal['model']}*\n\n"
             f"{deal['name']}\n"
             f"💰 *{deal['price']:.2f} €*\n\n"
-            f"🔗 [Zum Angebot]({deal['link']})"
+            f"🔗 [Bei Amazon kaufen]({deal['link']})"
         )
         await bot.send_message(chat_id=CHANNEL_ID, text=text, parse_mode="Markdown")
         await asyncio.sleep(2)
@@ -167,8 +182,8 @@ async def main():
         )
         scheduler.start()
 
-        print("Bot gestartet - tägliche Suche um 7 Uhr")
-        await get_best_deals(bot)   # Testlauf
+        print("Bot gestartet - tägliche Amazon-Suche um 7 Uhr")
+        await get_best_deals(bot)  # Testlauf
 
         while True:
             await asyncio.sleep(3600)
