@@ -148,3 +148,26 @@ async def get_best_deals(bot: Bot):
 
 # -------------------------------------------------------------
 # START
+# -------------------------------------------------------------
+async def main():
+    threading.Thread(target=run_health_server, daemon=True).start()
+
+    async with Bot(token=TOKEN) as bot:
+        scheduler = AsyncIOScheduler(timezone="Europe/Berlin")
+        scheduler.add_job(
+            lambda: asyncio.create_task(get_best_deals(bot)),
+            "cron",
+            hour=7,
+            minute=0
+        )
+        scheduler.start()
+
+        print("Bot gestartet - tägliche Idealo-Suche um 7 Uhr")
+        await get_best_deals(bot)
+
+        while True:
+            await asyncio.sleep(3600)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
