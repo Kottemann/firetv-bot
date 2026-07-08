@@ -1,5 +1,4 @@
-requests
 beautifulsoup4
 python-telegram-bot
 APScheduler
-cloudscraper
+playwright
