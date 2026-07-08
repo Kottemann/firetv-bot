@@ -1,10 +1,10 @@
-import requests
-from bs4 import BeautifulSoup
 import asyncio
 import os
+from datetime import datetime
+from bs4 import BeautifulSoup
+import cloudscraper  # <-- WICHTIG: Ersetzt requests, um Cloudflare zu umgehen
 from telegram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from datetime import datetime
 
 TOKEN = os.getenv("TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
@@ -12,8 +12,6 @@ CHANNEL_ID = os.getenv("CHANNEL_ID")
 if not TOKEN or not CHANNEL_ID:
     print("❌ TOKEN oder CHANNEL_ID fehlt!")
     exit(1)
-
-bot = Bot(token=TOKEN)
 
 PRICE_LIMITS = {
     "Fire TV Stick 4K": 80,
@@ -29,25 +27,17 @@ MODELS = {
     "Fire TV Cube": "https://geizhals.de/?fs=fire+tv+cube"
 }
 
-async def get_best_deals():
+# Wir übergeben den initialisierten bot an die Funktion
+async def get_best_deals(bot: Bot):
     print(f"[{datetime.now().strftime('%H:%M')}] Geizhals Suche gestartet...")
     good_deals = []
 
-    # Sehr realistische Browser-Headers
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "de-DE,de;q=0.9,en;q=0.8",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Referer": "https://www.google.com/",
-        "DNT": "1",
-        "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1"
-    }
+    # Cloudscraper instanziieren
+    scraper = cloudscraper.create_scraper()
 
     for model, url in MODELS.items():
         try:
-            resp = requests.get(url, headers=headers, timeout=20)
+            resp = scraper.get(url, timeout=20)
             print(f"   → {model}: Status {resp.status_code}")
             
             if resp.status_code != 200:
@@ -89,32 +79,32 @@ async def get_best_deals():
     if good_deals:
         print(f"✅ {len(good_deals)} gute Deals gefunden!")
         await bot.send_message(chat_id=CHANNEL_ID, 
-                              text=f"🔥 **Geizhals Fire TV Deals** — {datetime.now().strftime('%d.%m.%Y')}",
+                              text=f"🔥 *Geizhals Fire TV Deals* — {datetime.now().strftime('%d.%m.%Y')}",
                               parse_mode='Markdown')
         
         for deal in sorted(good_deals, key=lambda x: x['price'])[:3]:
-            msg = f"""🔥 **{deal['model']}**
-
-**{deal['name']}**
-💰 **{deal['price']:.2f} €**
-
-🔗 [Zum Angebot]({deal['link']})
-"""
+            # Achtung bei Markdown: Zeichen wie _ oder * im Produktnamen können zu Fehlern führen.
+            # Daher nutzen wir hier einfaches Text-Parsing oder escapen es.
+            msg = f"🔥 *{deal['model']}*\n\n{deal['name']}\n💰 *{deal['price']:.2f} €*\n\n🔗 [Zum Angebot]({deal['link']})"
             await bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode='Markdown')
             await asyncio.sleep(2)
     else:
         print("❌ Keine guten Deals unter den Preisgrenzen gefunden.")
 
 async def main():
-    scheduler = AsyncIOScheduler(timezone="Europe/Berlin")
-    scheduler.add_job(get_best_deals, 'cron', hour=7, minute=0)
-    scheduler.start()
-    print("Bot gestartet - sucht täglich um 7 Uhr auf Geizhals")
-    
-    await get_best_deals()
+    # Hier initialisieren wir den Bot korrekt innerhalb des asynchronen Kontextes
+    async with Bot(token=TOKEN) as bot:
+        scheduler = AsyncIOScheduler(timezone="Europe/Berlin")
+        # Wir nutzen einen Lambda-Ausdruck, um den Bot an die Funktion zu übergeben
+        scheduler.add_job(lambda: get_best_deals(bot), 'cron', hour=7, minute=0)
+        scheduler.start()
+        print("Bot gestartet - sucht täglich um 7 Uhr auf Geizhals")
+        
+        # Einmaliger Testlauf beim Start
+        await get_best_deals(bot)
 
-    while True:
-        await asyncio.sleep(3600)
+        while True:
+            await asyncio.sleep(3600)
 
 if __name__ == "__main__":
     asyncio.run(main())
