@@ -29,7 +29,7 @@ PRICE_LIMITS = {
     "Fire TV Cube": 150
 }
 
-# Aktuelle Amazon.de Links (Stand Juli 2026)
+# Aktuelle Amazon.de Links
 MODELS = {
     "Fire TV Stick 4K": "https://www.amazon.de/Amazon-Fire-TV-Stick-4K/dp/B0C1H26C7X",
     "Fire TV Stick 4K Plus": "https://www.amazon.de/Amazon-Fire-TV-Stick-4K-Plus/dp/B0C1H1X7Z6",
@@ -87,7 +87,7 @@ async def get_best_deals(bot: Bot):
 
             soup = BeautifulSoup(response.text, "lxml")
 
-            # Preis finden
+            # Preis extrahieren
             price = None
             price_selectors = [
                 "span.a-price-whole",
@@ -104,4 +104,16 @@ async def get_best_deals(bot: Bot):
                     text = element.get_text(strip=True)
                     match = re.search(r"[\d.,]+", text)
                     if match:
-                        price_str = match.group(
+                        price_str = match.group(0).replace(".", "").replace(",", ".")
+                        price = float(price_str)
+                        break
+
+            # Fallback-Suche
+            if not price:
+                match = re.search(r"([\d.,]+)\s*€", response.text[:6000])
+                if match:
+                    price = float(match.group(1).replace(".", "").replace(",", "."))
+
+            if price:
+                limit = PRICE_LIMITS.get(model, 999)
+                if price <= limit + 10:
